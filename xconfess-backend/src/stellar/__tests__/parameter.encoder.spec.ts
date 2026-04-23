@@ -1,5 +1,12 @@
 import * as StellarSDK from '@stellar/stellar-sdk';
 import {
+  encodeStringParam,
+  encodeU64Param,
+  encodeBytesParam,
+  encodeBoolParam,
+  encodeAddressParam,
+  encodeVecParam,
+  encodeMapParam,
   encodeContractArg,
   encodeContractArgs,
   type ContractArg,
@@ -17,13 +24,8 @@ describe('parameter.encoder — Soroban ScVal encoding regression', () => {
     expect(StellarSDK.scValToNative(emptyVec)).toEqual([]);
     expect(StellarSDK.scValToNative(emptyMap)).toEqual({});
 
-    // Lock in XDR as a regression guard.
-    expect(xdr64(emptyVec)).toMatchInlineSnapshot(
-      `"AAAAAQAAAAAAAAAA"`,
-    );
-    expect(xdr64(emptyMap)).toMatchInlineSnapshot(
-      `"AAAAAgAAAAAAAAAA"`,
-    );
+    expect(xdr64(emptyVec)).toMatchInlineSnapshot(`"AAAAAQAAAAAAAAAA"`);
+    expect(xdr64(emptyMap)).toMatchInlineSnapshot(`"AAAAAgAAAAAAAAAA"`);
   });
 
   it('covers complex nested values (map -> vec -> map) with stable XDR', () => {
@@ -48,11 +50,12 @@ describe('parameter.encoder — Soroban ScVal encoding regression', () => {
     };
 
     const scv = encodeContractArg(arg);
-    // Smoke-check roundtrip shape is representable natively.
-    const native = StellarSDK.scValToNative(scv) as any;
+    const native = StellarSDK.scValToNative(scv) as Record<string, unknown[]>;
     expect(native.outer[0]).toBe('a');
-    expect(native.outer[1].nested.toString()).toBe('42');
-    expect(native.outer[1].flag).toBe(true);
+    expect((native.outer[1] as { nested: { toString(): string } }).nested.toString()).toBe(
+      '42',
+    );
+    expect((native.outer[1] as { flag: boolean }).flag).toBe(true);
 
     expect(xdr64(scv)).toMatchInlineSnapshot(
       `"AAAAAgAAAAEAAAACAAAAAQAAAAEAAAAGAAAAAW91dGVyAAAAAQAAAAEAAAABAAAABgAAAAFvdXRlcgAAAAACAAAAAwAAAAEAAAAGAAAAAWIAAAACAAAAAgAAAAEAAAAGAAAAAWZsYWcAAAAAAQAAAAEAAAABAAAABgAAAABuZXN0ZWQAAAAAAQAAAAAAAAAAKgAAAAEAAAADAAAABAAAAADe2+7v"`,
@@ -66,11 +69,9 @@ describe('parameter.encoder — Soroban ScVal encoding regression', () => {
       value: { type: 'string', value: 'hello' },
     });
 
-    // None is a void ScVal.
     expect(none.switch()).toBe(StellarSDK.xdr.ScValType.scvVoid());
     expect(xdr64(none)).toMatchInlineSnapshot(`"AAAAAA=="`);
 
-    // Some encodes to the inner value, not a wrapper.
     expect(StellarSDK.scValToNative(some)).toBe('hello');
     expect(xdr64(some)).toMatchInlineSnapshot(
       `"AAAAAQAAAAUAAAAGAAAABWhlbGxv"`,
@@ -108,10 +109,9 @@ describe('parameter.encoder — Soroban ScVal encoding regression', () => {
   });
 
   it('throws a stable error for unsupported arg types (guard rail)', () => {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-    expect(() => encodeContractArg({ type: 'nope', value: 1 } as any)).toThrow(
-      'Unsupported contract arg type: nope',
-    );
+    expect(() =>
+      encodeContractArg({ type: 'nope', value: 1 } as unknown as ContractArg),
+    ).toThrow('Unsupported contract arg type: nope');
   });
 
   it('encodes arrays of args and preserves ordering with nested optionals', () => {
@@ -132,23 +132,75 @@ describe('parameter.encoder — Soroban ScVal encoding regression', () => {
     expect(Number(StellarSDK.scValToNative(scvs[2]))).toBe(9);
     expect(StellarSDK.scValToNative(scvs[3])).toEqual([false]);
   });
+
+  it('rejects excessive nesting without panicking', () => {
+    let deep: ContractArg = { type: 'string', value: 'leaf' };
+    for (let i = 0; i < 60; i++) {
+      deep = { type: 'vec', value: [deep] };
+    }
+    expect(() => encodeContractArg(deep)).toThrow(/maximum depth/);
+  });
+
+  it('rejects circular vec references with a stable error', () => {
+    const cyclic: ContractArg = { type: 'vec', value: [] };
+    (cyclic as { type: 'vec'; value: ContractArg[] }).value.push(cyclic);
+    expect(() => encodeContractArg(cyclic)).toThrow('Circular contract arg reference');
+  });
+
+  it('rejects invalid vec and map value shapes', () => {
+    expect(() =>
+      encodeContractArg({ type: 'vec', value: {} as unknown as ContractArg[] }),
+    ).toThrow('Invalid vec: value must be an array');
+
+    expect(() =>
+      encodeContractArg({ type: 'map', value: [] as unknown as Record<string, ContractArg> }),
+    ).toThrow('Invalid map: value must be a plain object');
+  });
+
+  it('rejects out-of-range and non-integer u64', () => {
+    expect(() => encodeContractArg({ type: 'u64', value: -1 })).toThrow(
+      'Invalid u64: expected a non-negative integer',
+    );
+    expect(() => encodeContractArg({ type: 'u64', value: 1.5 })).toThrow(
+      'Invalid u64: expected a non-negative integer',
+    );
+    expect(() =>
+      encodeContractArg({ type: 'u64', value: (1n << 64n) as unknown as bigint }),
+    ).toThrow('Invalid u64: out of uint64 range');
+  });
+
+  it('rejects malformed addresses with a stable prefix', () => {
+    expect(() =>
+      encodeContractArg({ type: 'address', value: 'not-an-address' }),
+    ).toThrow(/^Invalid Stellar address:/);
+  });
+
+  it('rejects encodeContractArgs when the payload is not an array', () => {
+    expect(() =>
+      encodeContractArgs({} as unknown as ContractArg[]),
+    ).toThrow('Invalid contract args: expected an array');
+  });
+
+  it('rejects vec and map payloads that exceed configured limits', () => {
+    const tooManyItems: ContractArg[] = Array.from({ length: 513 }, () => ({
+      type: 'bool' as const,
+      value: true,
+    }));
+    expect(() => encodeContractArg({ type: 'vec', value: tooManyItems })).toThrow(
+      'Invalid vec: length exceeds maximum',
+    );
+
+    const tooManyKeys: Record<string, ContractArg> = {};
+    for (let i = 0; i < 257; i++) {
+      tooManyKeys[`k${i}`] = { type: 'u64', value: 0 };
+    }
+    expect(() => encodeContractArg({ type: 'map', value: tooManyKeys })).toThrow(
+      'Invalid map: entry count exceeds maximum',
+    );
+  });
 });
 
-import * as StellarSDK from '@stellar/stellar-sdk';
-import {
-  encodeStringParam,
-  encodeU64Param,
-  encodeBytesParam,
-  encodeBoolParam,
-  encodeAddressParam,
-  encodeVecParam,
-  encodeMapParam,
-  encodeContractArg,
-  encodeContractArgs,
-  ContractArg,
-} from '../utils/parameter.encoder';
-
-describe('parameter.encoder', () => {
+describe('parameter.encoder — scalar helpers', () => {
   describe('encodeStringParam', () => {
     it('encodes a string to ScVal', () => {
       const val = encodeStringParam('hello');
@@ -237,8 +289,8 @@ describe('parameter.encoder', () => {
     });
   });
 
-  describe('encodeContractArgs — anchor_confession shape', () => {
-    it('encodes the exact args used by anchorConfession()', () => {
+  describe('encodeContractArgs — anchor_confession shape (allowlisted compatibility)', () => {
+    it('encodes the exact args used by anchor_confession()', () => {
       const hash =
         'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
       const ts = 1_700_000_000;

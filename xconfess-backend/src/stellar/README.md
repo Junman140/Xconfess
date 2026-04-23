@@ -92,5 +92,4 @@ See `.env.example` for all required variables.
 - Network errors are common; always handle exceptions
 
 ## TODO
-- Optimize contract parameter encoding for complex types
 - Add more granular admin guards for contract endpoints
