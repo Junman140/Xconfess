@@ -1,9 +1,20 @@
 import * as StellarSDK from '@stellar/stellar-sdk';
 import {
+  encodeStringParam,
+  encodeU64Param,
+  encodeBytesParam,
+  encodeBoolParam,
+  encodeAddressParam,
+  encodeVecParam,
+  encodeMapParam,
   encodeContractArg,
   encodeContractArgs,
   type ContractArg,
 } from '../utils/parameter.encoder';
+
+/** Deterministic public key fixture (valid G-account) for stable XDR snapshots. */
+const SAMPLE_PUBLIC_KEY =
+  'GACRG7PJ62DGGUXXVA3XVTAAZGMFMHEIYNN7MUT56LBXC4WW6KKDOPM2';
 
 function xdr64(v: StellarSDK.xdr.ScVal): string {
   return v.toXDR('base64');
@@ -17,13 +28,12 @@ describe('parameter.encoder — Soroban ScVal encoding regression', () => {
     expect(StellarSDK.scValToNative(emptyVec)).toEqual([]);
     expect(StellarSDK.scValToNative(emptyMap)).toEqual({});
 
-    // Lock in XDR as a regression guard.
-    expect(xdr64(emptyVec)).toMatchInlineSnapshot(
-      `"AAAAAQAAAAAAAAAA"`,
-    );
-    expect(xdr64(emptyMap)).toMatchInlineSnapshot(
-      `"AAAAAgAAAAAAAAAA"`,
-    );
+    expect(xdr64(emptyVec)).toMatchInlineSnapshot(`"AAAAAQAAAAAAAAAA"`);
+    expect(xdr64(emptyMap)).toMatchInlineSnapshot(`"AAAAAgAAAAAAAAAA"`);
+  });
+
+  it('encodes encodeContractArgs([]) as an empty ScVal list', () => {
+    expect(encodeContractArgs([])).toEqual([]);
   });
 
   it('covers complex nested values (map -> vec -> map) with stable XDR', () => {
@@ -48,15 +58,48 @@ describe('parameter.encoder — Soroban ScVal encoding regression', () => {
     };
 
     const scv = encodeContractArg(arg);
-    // Smoke-check roundtrip shape is representable natively.
-    const native = StellarSDK.scValToNative(scv) as any;
+    const native = StellarSDK.scValToNative(scv) as Record<string, unknown[]>;
     expect(native.outer[0]).toBe('a');
-    expect(native.outer[1].nested.toString()).toBe('42');
-    expect(native.outer[1].flag).toBe(true);
+    expect((native.outer[1] as { nested: { toString(): string } }).nested.toString()).toBe(
+      '42',
+    );
+    expect((native.outer[1] as { flag: boolean }).flag).toBe(true);
 
     expect(xdr64(scv)).toMatchInlineSnapshot(
       `"AAAAAgAAAAEAAAACAAAAAQAAAAEAAAAGAAAAAW91dGVyAAAAAQAAAAEAAAABAAAABgAAAAFvdXRlcgAAAAACAAAAAwAAAAEAAAAGAAAAAWIAAAACAAAAAgAAAAEAAAAGAAAAAWZsYWcAAAAAAQAAAAEAAAABAAAABgAAAABuZXN0ZWQAAAAAAQAAAAAAAAAAKgAAAAEAAAADAAAABAAAAADe2+7v"`,
     );
+  });
+
+  it('encodes map + option(vec(address)) with stable XDR and native roundtrip', () => {
+    const arg: ContractArg = {
+      type: 'map',
+      value: {
+        meta: { type: 'string', value: 'x' },
+        signer: {
+          type: 'option',
+          value: {
+            type: 'vec',
+            value: [{ type: 'address', value: SAMPLE_PUBLIC_KEY }],
+          },
+        },
+      },
+    };
+    const once = encodeContractArg(arg);
+    const twice = encodeContractArg(arg);
+    expect(xdr64(once)).toBe(xdr64(twice));
+
+    const native = StellarSDK.scValToNative(once) as {
+      meta: string;
+      signer: unknown[];
+    };
+    expect(native.meta).toBe('x');
+    expect(native.signer).toHaveLength(1);
+    const addrNode = native.signer[0];
+    const addrStr =
+      typeof addrNode === 'string'
+        ? addrNode
+        : (addrNode as StellarSDK.Address).toString();
+    expect(addrStr).toBe(SAMPLE_PUBLIC_KEY);
   });
 
   it('encodes optionals: null -> scvVoid; some(value) -> encoded inner ScVal', () => {
@@ -66,14 +109,32 @@ describe('parameter.encoder — Soroban ScVal encoding regression', () => {
       value: { type: 'string', value: 'hello' },
     });
 
-    // None is a void ScVal.
     expect(none.switch()).toBe(StellarSDK.xdr.ScValType.scvVoid());
     expect(xdr64(none)).toMatchInlineSnapshot(`"AAAAAA=="`);
 
-    // Some encodes to the inner value, not a wrapper.
     expect(StellarSDK.scValToNative(some)).toBe('hello');
     expect(xdr64(some)).toMatchInlineSnapshot(
       `"AAAAAQAAAAUAAAAGAAAABWhlbGxv"`,
+    );
+  });
+
+  it('encodes nested option shapes (Some inner encodes to native)', () => {
+    const someNone = encodeContractArg({
+      type: 'option',
+      value: { type: 'option', value: null },
+    });
+    expect(someNone.switch()).toBe(StellarSDK.xdr.ScValType.scvVoid());
+
+    const someSome = encodeContractArg({
+      type: 'option',
+      value: {
+        type: 'option',
+        value: { type: 'string', value: 'nested' },
+      },
+    });
+    expect(StellarSDK.scValToNative(someSome)).toBe('nested');
+    expect(xdr64(someSome)).toBe(
+      xdr64(encodeContractArg({ type: 'string', value: 'nested' })),
     );
   });
 
@@ -97,6 +158,15 @@ describe('parameter.encoder — Soroban ScVal encoding regression', () => {
     expect(xdr64(aThenB)).toBe(xdr64(bThenA));
   });
 
+  it('encodes empty hex bytes string as empty ScVal bytes', () => {
+    const scv = encodeContractArg({ type: 'bytes', value: '' });
+    const native = StellarSDK.scValToNative(scv) as Buffer;
+    expect(native.length).toBe(0);
+    expect(xdr64(scv)).toBe(
+      xdr64(encodeContractArg({ type: 'bytes', value: Buffer.alloc(0) })),
+    );
+  });
+
   it('produces stable validation errors for invalid bytes hex', () => {
     expect(() =>
       encodeContractArg({ type: 'bytes', value: 'abc' }),
@@ -107,11 +177,16 @@ describe('parameter.encoder — Soroban ScVal encoding regression', () => {
     ).toThrow('Invalid hex bytes: non-hex characters present');
   });
 
+  it('rejects invalid Stellar addresses when encoding', () => {
+    expect(() =>
+      encodeContractArg({ type: 'address', value: 'not-a-g-address' }),
+    ).toThrow();
+  });
+
   it('throws a stable error for unsupported arg types (guard rail)', () => {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-    expect(() => encodeContractArg({ type: 'nope', value: 1 } as any)).toThrow(
-      'Unsupported contract arg type: nope',
-    );
+    expect(() =>
+      encodeContractArg({ type: 'nope', value: 1 } as unknown as ContractArg),
+    ).toThrow('Unsupported contract arg type: nope');
   });
 
   it('encodes arrays of args and preserves ordering with nested optionals', () => {
@@ -132,23 +207,32 @@ describe('parameter.encoder — Soroban ScVal encoding regression', () => {
     expect(Number(StellarSDK.scValToNative(scvs[2]))).toBe(9);
     expect(StellarSDK.scValToNative(scvs[3])).toEqual([false]);
   });
+
+  it('matches encodeVecParam / encodeMapParam XDR to encodeContractArg for the same payload', () => {
+    const vecArg: ContractArg = {
+      type: 'vec',
+      value: [{ type: 'u64', value: 3n }],
+    };
+    expect(xdr64(encodeVecParam(vecArg.value))).toBe(xdr64(encodeContractArg(vecArg)));
+
+    const mapArg: ContractArg = {
+      type: 'map',
+      value: { k: { type: 'bool', value: true } },
+    };
+    expect(xdr64(encodeMapParam(mapArg.value))).toBe(
+      xdr64(encodeContractArg(mapArg)),
+    );
+  });
+
+  it('passes raw ScVal through encodeContractArgs unchanged', () => {
+    const raw = StellarSDK.nativeToScVal(99n, { type: 'u64' });
+    const out = encodeContractArgs([raw]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toBe(raw);
+  });
 });
 
-import * as StellarSDK from '@stellar/stellar-sdk';
-import {
-  encodeStringParam,
-  encodeU64Param,
-  encodeBytesParam,
-  encodeBoolParam,
-  encodeAddressParam,
-  encodeVecParam,
-  encodeMapParam,
-  encodeContractArg,
-  encodeContractArgs,
-  ContractArg,
-} from '../utils/parameter.encoder';
-
-describe('parameter.encoder', () => {
+describe('parameter.encoder — scalar helpers', () => {
   describe('encodeStringParam', () => {
     it('encodes a string to ScVal', () => {
       const val = encodeStringParam('hello');
