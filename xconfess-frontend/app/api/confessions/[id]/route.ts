@@ -1,5 +1,5 @@
 import { getApiBaseUrl } from "@/app/lib/config";
-import { logProxyError, buildProxyErrorResponse } from "@/app/lib/utils/proxyError";
+import { createApiErrorResponse } from "@/lib/apiErrorHandler";
 
 const BASE_API_URL = getApiBaseUrl();
 
@@ -10,10 +10,7 @@ export async function GET(
   try {
     const { id } = await context.params;
     if (!id) {
-      return new Response(
-        JSON.stringify({ message: "Confession ID is required" }),
-        { status: 400, headers: { "Content-Type": "application/json" } },
-      );
+      return createApiErrorResponse("Confession ID is required", { status: 400 });
     }
 
     const url = `${BASE_API_URL}/confessions/${id}`;
@@ -112,8 +109,12 @@ export async function GET(
           { status: 404, headers: { "Content-Type": "application/json" } },
         );
       }
-      const err = await response.json().catch(() => ({} as { message?: string }));
-      return buildProxyErrorResponse(err.message || "Failed to fetch confession", response.status);
+      const err = await response.json().catch(() => ({}));
+      return createApiErrorResponse(err, {
+        status: response.status,
+        fallbackMessage: "Failed to fetch confession",
+        route: "GET /api/confessions/[id]"
+      });
     }
 
     const data = await response.json();
@@ -224,8 +225,10 @@ export async function GET(
       });
     }
 
-    logProxyError("Error fetching confession", { route: "GET /api/confessions/[id]" }, error);
-    return buildProxyErrorResponse("Internal server error", 500, { route: "GET /api/confessions/[id]" });
+    return createApiErrorResponse(error, {
+      status: 500,
+      route: "GET /api/confessions/[id]"
+    });
   }
 }
 

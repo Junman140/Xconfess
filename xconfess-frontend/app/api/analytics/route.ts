@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
 import { getApiBaseUrl } from '@/app/lib/config';
-import { logProxyError } from "@/app/lib/utils/proxyError";
+import { createApiErrorResponse } from "@/lib/apiErrorHandler";
 
 const BACKEND_URL = getApiBaseUrl();
 
@@ -471,14 +471,10 @@ export async function GET(request: Request) {
 
     return NextResponse.json(payload);
   } catch (error: any) {
-    logProxyError(
-      "Analytics fetch error",
-      { route: "GET /api/analytics", backendStatus: error?.response?.status },
-      error,
-    );
-    return NextResponse.json(
-      { error: "Failed to fetch real-time analytics" },
-      { status: (error?.response?.status as number | undefined) ?? 500 },
-    );
+    return createApiErrorResponse(error, {
+      status: error?.response?.status || 500,
+      fallbackMessage: "Failed to fetch real-time analytics",
+      route: "GET /api/analytics"
+    });
   }
 }

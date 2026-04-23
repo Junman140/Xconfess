@@ -30,12 +30,7 @@ export type ScalarContractArg =
 
 export type ComplexContractArg =
   | { type: 'map'; value: Record<string, ContractArg> }
-  | { type: 'vec'; value: ContractArg[] }
-  /**
-   * Soroban option encoding.
-   * `null` encodes to `ScVal::Void` (None); otherwise encodes the inner value.
-   */
-  | { type: 'option'; value: ContractArg | null };
+  | { type: 'vec'; value: ContractArg[] };
 
 /** A fully-typed contract argument. Pass raw ScVal to skip encoding. */
 export type ContractArg =
@@ -54,14 +49,6 @@ export function encodeU64Param(val: number | bigint): StellarSDK.xdr.ScVal {
 }
 
 export function encodeBytesParam(val: Buffer | string): StellarSDK.xdr.ScVal {
-  if (typeof val === 'string') {
-    if (val.length % 2 !== 0) {
-      throw new Error('Invalid hex bytes: length must be even');
-    }
-    if (!/^[0-9a-fA-F]*$/.test(val)) {
-      throw new Error('Invalid hex bytes: non-hex characters present');
-    }
-  }
   const buf = typeof val === 'string' ? Buffer.from(val, 'hex') : val;
   return StellarSDK.nativeToScVal(buf, { type: 'bytes' });
 }
@@ -85,16 +72,12 @@ export function encodeVecParam(items: ContractArg[]): StellarSDK.xdr.ScVal {
 export function encodeMapParam(
   entries: Record<string, ContractArg>,
 ): StellarSDK.xdr.ScVal {
-  // Sort keys for stable XDR output independent of insertion order.
-  const mapEntries = Object.entries(entries)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(
+  const mapEntries = Object.entries(entries).map(
     ([k, v]) =>
       new StellarSDK.xdr.ScMapEntry({
         key: encodeStringParam(k),
         val: encodeContractArg(v),
       }),
-    ),
   );
   return StellarSDK.xdr.ScVal.scvMap(mapEntries);
 }
@@ -127,10 +110,6 @@ export function encodeContractArg(arg: ContractArg): StellarSDK.xdr.ScVal {
       return encodeVecParam(arg.value);
     case 'map':
       return encodeMapParam(arg.value);
-    case 'option':
-      return arg.value === null
-        ? StellarSDK.xdr.ScVal.scvVoid()
-        : encodeContractArg(arg.value);
     default: {
       // Exhaustiveness guard — avoid interpolating `never` in template literals (restrict-template-expressions).
       const u = arg as unknown as { type?: string };

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { backendHttpErrorResponse, internalProxyErrorResponse } from "@/app/lib/utils/proxyError";
+import { createApiErrorResponse } from "@/lib/apiErrorHandler";
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,17 +15,21 @@ export async function GET(request: NextRequest) {
     );
 
     if (!response.ok) {
-      const errData = await response.json().catch(() => ({} as { error?: string; message?: string }));
-      const message = errData.message ?? errData.error ?? "Failed to fetch preferences";
-      return backendHttpErrorResponse(message, response.status, "Failed to fetch preferences", {
-        route: "GET /api/notifications/preference",
+      const errData = await response.json().catch(() => ({}));
+      return createApiErrorResponse(errData, {
+        status: response.status,
+        fallbackMessage: "Failed to fetch preferences",
+        route: "GET /api/notifications/preference"
       });
     }
 
     const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    return internalProxyErrorResponse({ route: "GET /api/notifications/preference" }, error);
+    return createApiErrorResponse(error, {
+      status: 500,
+      route: "GET /api/notifications/preference"
+    });
   }
 }
 
@@ -47,16 +51,21 @@ export async function PUT(request: NextRequest) {
     );
 
     if (!response.ok) {
-      const errData = await response.json().catch(() => ({} as { error?: string; message?: string }));
-      const message = errData.message ?? errData.error ?? "Failed to save preferences";
-      return backendHttpErrorResponse(message, response.status, "Failed to save preferences", {
-        route: "PUT /api/notifications/preference",
+      const errData = await response.json().catch(() => ({}));
+      return createApiErrorResponse(errData, {
+        status: response.status,
+        fallbackMessage: "Failed to save preferences",
+        route: "PUT /api/notifications/preference"
       });
     }
 
     const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    return internalProxyErrorResponse({ route: "PUT /api/notifications/preference" }, error);
+    return createApiErrorResponse(error, {
+      status: 500,
+      route: "PUT /api/notifications/preference"
+    });
   }
 }
+

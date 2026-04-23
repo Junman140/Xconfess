@@ -1,4 +1,4 @@
-import { buildProxyErrorResponse, internalProxyErrorResponse } from "@/app/lib/utils/proxyError";
+import { createApiErrorResponse } from "@/lib/apiErrorHandler";
 import { getApiBaseUrl } from "@/app/lib/config";
 
 const BASE_API_URL = getApiBaseUrl();
@@ -15,10 +15,7 @@ export async function POST(
   try {
     const { confessionId } = await context.params;
     if (!confessionId) {
-      return new Response(
-        JSON.stringify({ message: "Confession ID is required" }),
-        { status: 400, headers: { "Content-Type": "application/json" } },
-      );
+      return createApiErrorResponse("Confession ID is required", { status: 400 });
     }
 
     body = await request.json().catch(() => ({}));
@@ -33,10 +30,7 @@ export async function POST(
       typeof content !== "string" ||
       content.trim().length === 0
     ) {
-      return new Response(
-        JSON.stringify({ message: "Comment content is required" }),
-        { status: 400, headers: { "Content-Type": "application/json" } },
-      );
+      return createApiErrorResponse("Comment content is required", { status: 400 });
     }
 
     const authHeader = request.headers.get("Authorization");
@@ -86,10 +80,11 @@ export async function POST(
       }
 
       const err = await response.json().catch(() => ({} as { message?: string }));
-      if (response.status === 401) {
-        return buildProxyErrorResponse("Please sign in to comment", 401, { route: "POST /api/comments/[confessionId]" });
-      }
-      return buildProxyErrorResponse(err.message || "Failed to post comment", response.status, { route: "POST /api/comments/[confessionId]" });
+      return createApiErrorResponse(err, {
+        status: response.status,
+        fallbackMessage: "Failed to post comment",
+        route: "POST /api/comments/[confessionId]"
+      });
     }
 
     const data = await response.json();
@@ -114,7 +109,7 @@ export async function POST(
     if (isDemoMode) {
       console.warn("Backend unreachable, returning demo comment for testing");
 
-      const { confessionId } = await context.params;
+      const { confessionId } = await context.params.catch(() => ({ confessionId: "unknown" }));
       // Use the body that was already read at the top
       const finalParentId = parentId != null ? Number(parentId) : null;
 
@@ -137,6 +132,10 @@ export async function POST(
       });
     }
 
-    return internalProxyErrorResponse({ route: "POST /api/comments/[confessionId]" }, error);
+    return createApiErrorResponse(error, {
+      status: 500,
+      route: "POST /api/comments/[confessionId]"
+    });
   }
 }
+

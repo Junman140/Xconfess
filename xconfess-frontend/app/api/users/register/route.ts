@@ -1,15 +1,17 @@
-import { misconfiguredBackendResponse, internalProxyErrorResponse } from "@/app/lib/utils/proxyError";
+import { createApiErrorResponse } from "@/lib/apiErrorHandler";
 
 const BASE_API_URL = process.env.BACKEND_API_URL;
 
 export async function POST(request: Request) {
-  if (!BASE_API_URL) return misconfiguredBackendResponse();
+  if (!BASE_API_URL) {
+    return createApiErrorResponse("BACKEND_API_URL is not set", { status: 503 });
+  }
+
+  const correlationId = request.headers.get("X-Correlation-ID") || "unknown";
 
   try {
     const body = await request.json();
     const backendUrl = `${BASE_API_URL}/users/register`;
-
-    const correlationId = request.headers.get("X-Correlation-ID") || "unknown";
 
     const response = await fetch(backendUrl, {
       method: "POST",
@@ -20,16 +22,28 @@ export async function POST(request: Request) {
       body: JSON.stringify(body),
     });
 
-    const responseBody = await response.text();
-    const status = response.status;
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      return createApiErrorResponse(errData, {
+        status: response.status,
+        correlationId,
+        route: "POST /api/users/register"
+      });
+    }
 
+    const responseBody = await response.text();
     return new Response(responseBody, {
-      status,
+      status: 200,
       headers: {
         "Content-Type": "application/json",
       },
     });
   } catch (error) {
-    return internalProxyErrorResponse({ route: "POST /api/users/register" }, error);
+    return createApiErrorResponse(error, {
+      status: 500,
+      correlationId,
+      route: "POST /api/users/register"
+    });
   }
 }
+

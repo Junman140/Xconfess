@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { backendHttpErrorResponse, internalProxyErrorResponse } from "@/app/lib/utils/proxyError";
+import { createApiErrorResponse } from "@/lib/apiErrorHandler";
 
 export async function GET(request: NextRequest) {
-  const correlationId = request.headers.get("X-Correlation-ID") ?? undefined;
+  const correlationId = request.headers.get("X-Correlation-ID") || "unknown";
 
   try {
     // Get auth token from headers
@@ -26,17 +26,23 @@ export async function GET(request: NextRequest) {
     );
 
     if (!response.ok) {
-      const errData = await response.json().catch(() => ({} as { error?: string; message?: string }));
-      const message = errData.message ?? errData.error ?? "Failed to fetch notifications";
-      return backendHttpErrorResponse(message, response.status, "Failed to fetch notifications", {
-        route: "GET /api/notifications",
+      const errData = await response.json().catch(() => ({}));
+      return createApiErrorResponse(errData, {
+        status: response.status,
         correlationId,
+        fallbackMessage: "Failed to fetch notifications",
+        route: "GET /api/notifications",
       });
     }
 
     const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    return internalProxyErrorResponse({ route: "GET /api/notifications", correlationId }, error);
+    return createApiErrorResponse(error, {
+      status: 500,
+      correlationId,
+      route: "GET /api/notifications",
+    });
   }
 }
+

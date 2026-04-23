@@ -1,5 +1,5 @@
 import { getApiBaseUrl } from "@/app/lib/config";
-import { internalProxyErrorResponse } from "@/app/lib/utils/proxyError";
+import { createApiErrorResponse } from "@/lib/apiErrorHandler";
 
 const BASE_API_URL = getApiBaseUrl();
 
@@ -19,10 +19,7 @@ export async function POST(
   try {
     const { id } = await context.params;
     if (!id) {
-      return new Response(
-        JSON.stringify({ message: "Confession ID is required" }),
-        { status: 400, headers: { "Content-Type": "application/json" } },
-      );
+      return createApiErrorResponse("Confession ID is required", { status: 400 });
     }
 
     const body = await request.json().catch(() => ({} as any));
@@ -30,12 +27,7 @@ export async function POST(
     const reason = typeof body?.reason === "string" ? body.reason : undefined;
 
     if (!type || !ALLOWED_TYPES.has(type)) {
-      return new Response(
-        JSON.stringify({
-          message: "Invalid report type",
-        }),
-        { status: 400, headers: { "Content-Type": "application/json" } },
-      );
+      return createApiErrorResponse("Invalid report type", { status: 400 });
     }
 
     const anonymousUserId = request.headers.get("x-anonymous-user-id");
@@ -43,12 +35,7 @@ export async function POST(
 
     // The backend allows anonymous reports only if we supply x-anonymous-user-id.
     if (!authorization && !anonymousUserId) {
-      return new Response(
-        JSON.stringify({
-          message: "Missing anonymous user ID",
-        }),
-        { status: 401, headers: { "Content-Type": "application/json" } },
-      );
+      return createApiErrorResponse("Missing anonymous user ID", { status: 401 });
     }
 
     const idempotencyKey = request.headers.get("idempotency-key");
@@ -67,6 +54,14 @@ export async function POST(
       body: JSON.stringify({ type, reason }),
     });
 
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      return createApiErrorResponse(errData, {
+        status: res.status,
+        route: "POST /api/confessions/[id]/report"
+      });
+    }
+
     const text = await res.text();
     let payload: any = null;
     try {
@@ -76,13 +71,14 @@ export async function POST(
     }
 
     return new Response(JSON.stringify(payload), {
-      status: res.status,
+      status: 200,
       headers: { "Content-Type": "application/json" },
     });
   } catch (err) {
-    return internalProxyErrorResponse(
-      { route: "POST /api/confessions/[id]/report" },
-      err,
-    );
+    return createApiErrorResponse(err, {
+      status: 500,
+      route: "POST /api/confessions/[id]/report"
+    });
   }
 }
+

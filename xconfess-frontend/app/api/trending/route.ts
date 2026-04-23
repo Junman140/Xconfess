@@ -1,4 +1,4 @@
-import { logProxyError } from "@/app/lib/utils/proxyError";
+import { createApiErrorResponse } from "@/lib/apiErrorHandler";
 
 export async function GET(request: Request) {
   try {
@@ -7,10 +7,7 @@ export async function GET(request: Request) {
 
     // Validate period
     if (!['7days', '30days'].includes(period)) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid period. Use 7days or 30days' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
+      return createApiErrorResponse('Invalid period. Use 7days or 30days', { status: 400 });
     }
 
     const days = period === '7days' ? 7 : 30;
@@ -97,10 +94,10 @@ export async function GET(request: Request) {
       }
     });
   } catch (error) {
-    logProxyError("Error computing trending data", { route: "GET /api/trending" }, error);
-    return new Response(JSON.stringify({ error: "Failed to fetch analytics" }), {
+    return createApiErrorResponse(error, {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      fallbackMessage: "Failed to fetch analytics",
+      route: "GET /api/trending"
     });
   }
 }

@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Send, User as UserIcon, MessageSquare } from 'lucide-react';
+import { Send, User as UserIcon, MessageSquare, WifiOff, RefreshCw } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useGlobalToast } from '@/app/components/common/Toast';
 
@@ -154,9 +154,25 @@ export default function MessagesPage() {
           </div>
           <ScrollArea className="flex-1">
             {threadsError ? (
-              <div className="p-4 text-sm text-red-600">
-                <div className="mb-2">{threadsError}</div>
-                <Button variant="ghost" onClick={() => fetchThreads()}>Retry</Button>
+              <div className="p-8 flex flex-col items-center justify-center text-center space-y-4">
+                <div className="bg-amber-50 dark:bg-amber-900/20 p-4 rounded-full">
+                  <WifiOff className="w-8 h-8 text-amber-500" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Backend Unreachable</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 max-w-[200px]">
+                    Messages will appear once the backend is reachable
+                  </p>
+                </div>
+                <Button 
+                  size="sm" 
+                  variant="secondary" 
+                  onClick={() => fetchThreads()} 
+                  className="mt-2 gap-2"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  Retry Fetch
+                </Button>
               </div>
             ) : isLoadingThreads ? (
               <div className="p-4 space-y-4">
@@ -233,9 +249,20 @@ export default function MessagesPage() {
                     <Skeleton className="h-10 w-3/4" />
                   </div>
                 ) : messagesError ? (
-                  <div className="p-4 text-sm text-red-600">
-                    <div className="mb-2">{messagesError}</div>
-                    <Button variant="ghost" onClick={() => selectedThread && fetchMessages(selectedThread.confessionId, selectedThread.senderId)}>Retry</Button>
+                  <div className="p-8 flex flex-col items-center justify-center text-center space-y-4 h-full">
+                    <WifiOff className="w-8 h-8 text-amber-500" />
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Unable to load messages. The backend might be offline.
+                    </p>
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      onClick={() => selectedThread && fetchMessages(selectedThread.confessionId, selectedThread.senderId)}
+                      className="gap-2"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      Try Again
+                    </Button>
                   </div>
                 ) : (
                   <div className="space-y-6 pb-4">

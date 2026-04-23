@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { backendHttpErrorResponse, internalProxyErrorResponse } from "@/app/lib/utils/proxyError";
+import { createApiErrorResponse } from "@/lib/apiErrorHandler";
 
 export async function PATCH(request: NextRequest) {
   try {
@@ -16,16 +16,21 @@ export async function PATCH(request: NextRequest) {
     );
 
     if (!response.ok) {
-      const errData = await response.json().catch(() => ({} as { error?: string; message?: string }));
-      const message = errData.message ?? errData.error ?? "Failed to mark all as read";
-      return backendHttpErrorResponse(message, response.status, "Failed to mark all as read", {
-        route: "PATCH /api/notifications/read-all",
+      const errData = await response.json().catch(() => ({}));
+      return createApiErrorResponse(errData, {
+        status: response.status,
+        fallbackMessage: "Failed to mark all as read",
+        route: "PATCH /api/notifications/read-all"
       });
     }
 
     const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    return internalProxyErrorResponse({ route: "PATCH /api/notifications/read-all" }, error);
+    return createApiErrorResponse(error, {
+      status: 500,
+      route: "PATCH /api/notifications/read-all"
+    });
   }
 }
+

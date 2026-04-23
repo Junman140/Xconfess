@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getApiBaseUrl } from "@/app/lib/config";
-import { logProxyError } from "@/app/lib/utils/proxyError";
+import { createApiErrorResponse } from "@/lib/apiErrorHandler";
 
 const API_URL = getApiBaseUrl();
 const SESSION_COOKIE_NAME = "xconfess_session";
@@ -13,10 +13,7 @@ export async function POST(request: Request) {
         const password = typeof body?.password === "string" ? body.password : undefined;
 
         if (!email || !password) {
-            return NextResponse.json(
-                { message: "Email and password are required" },
-                { status: 400 },
-            );
+            return createApiErrorResponse("Email and password are required", { status: 400 });
         }
 
         const response = await fetch(`${API_URL}/auth/login`, {
@@ -27,10 +24,11 @@ export async function POST(request: Request) {
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({ message: "Login failed" }));
-            return NextResponse.json(
-                { message: error.message ?? "Login failed" },
-                { status: response.status }
-            );
+            return createApiErrorResponse(error, {
+                status: response.status,
+                fallbackMessage: "Login failed",
+                route: "POST /api/auth/session"
+            });
         }
 
         const data = await response.json();
@@ -48,11 +46,11 @@ export async function POST(request: Request) {
 
         return NextResponse.json({ user: data.user });
     } catch (error) {
-        logProxyError("Internal error", { route: "POST /api/auth/session" }, error);
-        return NextResponse.json(
-            { message: "An unexpected error occurred during login" },
-            { status: 500 }
-        );
+        return createApiErrorResponse(error, {
+            status: 500,
+            fallbackMessage: "An unexpected error occurred during login",
+            route: "POST /api/auth/session"
+        });
     }
 }
 
@@ -61,7 +59,7 @@ export async function GET() {
     const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
 
     if (!token) {
-        return NextResponse.json({ authenticated: false }, { status: 401 });
+        return createApiErrorResponse("Not authenticated", { status: 401 });
     }
 
     try {
@@ -74,14 +72,16 @@ export async function GET() {
 
         if (!response.ok) {
             cookieStore.delete(SESSION_COOKIE_NAME);
-            return NextResponse.json({ authenticated: false }, { status: 401 });
+            return createApiErrorResponse("Session expired", { status: 401 });
         }
 
         const user = await response.json();
         return NextResponse.json({ authenticated: true, user });
     } catch (error) {
-        logProxyError("Internal error", { route: "GET /api/auth/session" }, error);
-        return NextResponse.json({ authenticated: false }, { status: 500 });
+        return createApiErrorResponse(error, {
+            status: 500,
+            route: "GET /api/auth/session"
+        });
     }
 }
 
@@ -90,3 +90,4 @@ export async function DELETE() {
     cookieStore.delete(SESSION_COOKIE_NAME);
     return NextResponse.json({ success: true });
 }
+

@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { useWallet } from "@/lib/hooks/useWallet";
 import { anchorConfession, hashConfession } from "@/app/lib/utils/stellar";
+import { handleStellarError } from "@/lib/stellarErrorHandler";
 
 export interface StellarWalletState {
   isAvailable: boolean;
@@ -52,17 +53,18 @@ export function useStellarWallet() {
         const result = await anchorConfession(hash, timestamp);
 
         if (result.error) {
-          setAnchorError(result.error);
+          const stellarError = handleStellarError(result.error);
+          setAnchorError(stellarError.actionable || stellarError.message);
+          return { success: false, error: stellarError.message };
         } else {
           setAnchorError(null);
         }
 
         return result;
       } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : "Failed to anchor confession";
-        setAnchorError(errorMessage);
-        return { success: false, error: errorMessage };
+        const stellarError = handleStellarError(error);
+        setAnchorError(stellarError.actionable || stellarError.message);
+        return { success: false, error: stellarError.message };
       }
     },
     [wallet],

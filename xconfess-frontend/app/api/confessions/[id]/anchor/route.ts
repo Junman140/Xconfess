@@ -1,5 +1,5 @@
 import { getApiBaseUrl } from "@/app/lib/config";
-import { logProxyError, backendHttpErrorResponse, backendUnreachableResponse, internalProxyErrorResponse } from "@/app/lib/utils/proxyError";
+import { createApiErrorResponse } from "@/lib/apiErrorHandler";
 
 const BASE_API_URL = getApiBaseUrl();
 
@@ -7,30 +7,18 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   try {
-    const { id } = await params;
     const body = await request.json();
     const { stellarTxHash } = body;
 
     if (!stellarTxHash) {
-      return new Response(
-        JSON.stringify({ message: "Stellar transaction hash is required" }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+      return createApiErrorResponse("Stellar transaction hash is required", { status: 400 });
     }
 
     // Validate transaction hash format (64 hex characters)
     if (!/^[a-fA-F0-9]{64}$/.test(stellarTxHash)) {
-      return new Response(
-        JSON.stringify({ message: "Invalid Stellar transaction hash format" }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+      return createApiErrorResponse("Invalid Stellar transaction hash format", { status: 400 });
     }
 
     const backendUrl = `${BASE_API_URL}/confessions/${id}/anchor`;
@@ -45,13 +33,12 @@ export async function POST(
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({} as { message?: string }));
-        return backendHttpErrorResponse(
-          errorData.message,
-          response.status,
-          `Failed to anchor confession: ${response.statusText}`,
-          { route: "POST /api/confessions/[id]/anchor" },
-        );
+        const errorData = await response.json().catch(() => ({}));
+        return createApiErrorResponse(errorData, {
+          status: response.status,
+          fallbackMessage: `Failed to anchor confession: ${response.statusText}`,
+          route: "POST /api/confessions/[id]/anchor"
+        });
       }
 
       const data = await response.json();
@@ -61,8 +48,6 @@ export async function POST(
         headers: { "Content-Type": "application/json" },
       });
     } catch (fetchError) {
-      logProxyError("Backend fetch error", { route: "POST /api/confessions/[id]/anchor" }, fetchError);
-
       // Demo mode fallback
       const isDemoMode =
         process.env.NODE_ENV === "development" ||
@@ -88,9 +73,17 @@ export async function POST(
         );
       }
 
-      return backendUnreachableResponse({ route: "POST /api/confessions/[id]/anchor" }, fetchError);
+      return createApiErrorResponse(fetchError, {
+        status: 503,
+        fallbackMessage: "Backend service unreachable",
+        route: "POST /api/confessions/[id]/anchor"
+      });
     }
   } catch (error) {
-    return internalProxyErrorResponse({ route: "POST /api/confessions/[id]/anchor" }, error);
+    return createApiErrorResponse(error, {
+      status: 500,
+      route: "POST /api/confessions/[id]/anchor"
+    });
   }
 }
+

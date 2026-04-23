@@ -1,29 +1,25 @@
 import { normalizeConfession } from "../../lib/utils/normalizeConfession";
-import {
-  misconfiguredBackendResponse,
-  backendHttpErrorResponse,
-  backendUnreachableResponse,
-  internalProxyErrorResponse,
-} from "@/app/lib/utils/proxyError";
+import { createApiErrorResponse } from "@/lib/apiErrorHandler";
 
 const BASE_API_URL = process.env.BACKEND_API_URL;
 
 export async function POST(request: Request) {
   // Fail fast if backend URL is not configured
-  if (!BASE_API_URL) return misconfiguredBackendResponse();
+  if (!BASE_API_URL) {
+    return createApiErrorResponse("BACKEND_API_URL is not set", { status: 503 });
+  }
+
+  const correlationId = request.headers.get("X-Correlation-ID") || "unknown";
 
   try {
     const body = await request.json();
     const { title, message, body: bodyContent, gender, stellarTxHash } = body;
 
     if (!message && !bodyContent) {
-      return new Response(
-        JSON.stringify({ message: "Confession content is required" }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      return createApiErrorResponse("Confession content is required", { 
+        status: 400,
+        correlationId 
+      });
     }
 
     const confessionContent = bodyContent || message;
@@ -38,8 +34,6 @@ export async function POST(request: Request) {
     if (gender) backendBody.gender = gender;
     if (stellarTxHash) backendBody.stellarTxHash = stellarTxHash;
 
-    const correlationId = request.headers.get("X-Correlation-ID") || "unknown";
-
     try {
       const response = await fetch(backendUrl, {
         method: "POST",
@@ -51,13 +45,13 @@ export async function POST(request: Request) {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({} as { message?: string }));
-        return backendHttpErrorResponse(
-          errorData.message,
-          response.status,
-          `Failed to create confession: ${response.statusText}`,
-          { route: "POST /api/confessions", correlationId },
-        );
+        const errorData = await response.json().catch(() => ({}));
+        return createApiErrorResponse(errorData, {
+          status: response.status,
+          correlationId,
+          fallbackMessage: `Failed to create confession: ${response.statusText}`,
+          route: "POST /api/confessions"
+        });
       }
 
       const data = await response.json();
@@ -68,17 +62,27 @@ export async function POST(request: Request) {
         headers: { "Content-Type": "application/json" },
       });
     } catch (fetchError) {
-      return backendUnreachableResponse({ route: "POST /api/confessions", correlationId }, fetchError);
+      return createApiErrorResponse(fetchError, {
+        status: 503,
+        correlationId,
+        fallbackMessage: "Backend service unreachable",
+        route: "POST /api/confessions"
+      });
     }
   } catch (error) {
-    const correlationId = request.headers.get("X-Correlation-ID") || "unknown";
-    return internalProxyErrorResponse({ route: "POST /api/confessions", correlationId }, error);
+    return createApiErrorResponse(error, {
+      status: 500,
+      correlationId,
+      route: "POST /api/confessions"
+    });
   }
 }
 
 export async function GET(request: Request) {
   // Fail fast if backend URL is not configured
-  if (!BASE_API_URL) return misconfiguredBackendResponse();
+  if (!BASE_API_URL) {
+    return createApiErrorResponse("BACKEND_API_URL is not set", { status: 503 });
+  }
 
   const { searchParams } = new URL(request.url);
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1") || 1);
@@ -113,12 +117,12 @@ export async function GET(request: Request) {
     });
 
     if (!response.ok) {
-      return backendHttpErrorResponse(
-        undefined,
-        response.status,
-        `Failed to fetch confessions: ${response.statusText}`,
-        { route: "GET /api/confessions", correlationId },
-      );
+      return createApiErrorResponse(undefined, {
+        status: response.status,
+        correlationId,
+        fallbackMessage: `Failed to fetch confessions: ${response.statusText}`,
+        route: "GET /api/confessions"
+      });
     }
 
     const data = await response.json();
@@ -149,6 +153,12 @@ export async function GET(request: Request) {
       },
     );
   } catch (error) {
-    return backendUnreachableResponse({ route: "GET /api/confessions", correlationId }, error);
+    return createApiErrorResponse(error, {
+      status: 503,
+      correlationId,
+      fallbackMessage: "Backend service unreachable",
+      route: "GET /api/confessions"
+    });
   }
 }
+
